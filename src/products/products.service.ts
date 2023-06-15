@@ -7,11 +7,11 @@ import {
 } from '@nestjs/common';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { Product } from './entities/product.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
 import { validate as isUUID } from 'uuid';
+import { Product, ProductImage } from './entities';
 
 @Injectable()
 export class ProductsService {
@@ -19,13 +19,23 @@ export class ProductsService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(ProductImage)
+    private readonly productImageRepository: Repository<ProductImage>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(createProductDto: CreateProductDto) {
     try {
-      const product = this.productRepository.create(createProductDto);
+      const { images = [], ...productDetails } = createProductDto;
+
+      const product = this.productRepository.create({
+        ...productDetails,
+        images: images.map((image) =>
+          this.productImageRepository.create({ url: image }),
+        ),
+      });
       await this.productRepository.save(product);
-      return product;
+      return { ...product, images };
     } catch (error) {
       this.handleExceptions(error);
     }
@@ -34,11 +44,17 @@ export class ProductsService {
   async findAll(pagination: PaginationDto) {
     try {
       const { limit = 2, offset = 0 } = pagination;
-      const products = this.productRepository.find({
+      const products = await this.productRepository.find({
         take: limit,
         skip: offset,
+        relations: {
+          images: true,
+        },
       });
-      return products;
+      return products.map((product) => ({
+        ...product,
+        images: product.images.map((img) => img.url),
+      }));
     } catch (error) {
       this.handleExceptions(error);
     }
@@ -48,16 +64,17 @@ export class ProductsService {
     try {
       let product: Product;
       if (isUUID(search)) {
-        product = await this.productRepository.findOne({
-          where: { id: search },
+        product = await this.productRepository.findOneBy({
+          id: search,
         });
       } else {
-        const query = this.productRepository.createQueryBuilder();
+        const query = this.productRepository.createQueryBuilder('prod');
         product = await query
           .where(`UPPER(title) = :title or slug = :slug`, {
             title: search.toUpperCase(),
             slug: search.toLowerCase(),
           })
+          .leftJoinAndSelect('prod.images', 'prodImages')
           .getOne();
       }
       if (!product) {
@@ -71,18 +88,44 @@ export class ProductsService {
     }
   }
 
-  async update(id: string, updateProductDto: UpdateProductDto) {
+  async findOnePlain(search: string) {
     try {
+      const product = await this.findOne(search);
+      return { ...product, images: product.images.map((img) => img.url) };
+    } catch (error) {
+      this.handleExceptions(error);
+    }
+  }
+
+  async update(id: string, updateProductDto: UpdateProductDto) {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const { images, ...toUpdate } = updateProductDto;
       const product = await this.productRepository.preload({
-        id: id,
-        ...updateProductDto,
+        id,
+        ...toUpdate,
       });
       if (!product) {
         throw new NotFoundException(`El id ${id} no arrojó ningún resultado`);
       }
-      await this.productRepository.save(product);
-      return product;
+
+      if (images) {
+        await runner.manager.delete(ProductImage, { product: { id } });
+        product.images = images.map((image) =>
+          this.productImageRepository.create({ url: image }),
+        );
+      }
+
+      await runner.manager.save(product);
+      await runner.commitTransaction();
+      await runner.release();
+
+      return this.findOnePlain(id);
     } catch (error) {
+      await runner.rollbackTransaction();
+      await runner.release();
       this.handleExceptions(error);
     }
   }
@@ -91,18 +134,33 @@ export class ProductsService {
     try {
       const product = await this.findOne(id);
       await this.productRepository.remove(product);
-      return product;
+      return { ...product, images: product.images.map((img) => img.url) };
     } catch (error) {
-      this.handleExceptions(error);
+      await this.handleExceptions(error);
+    }
+  }
+
+  async deleteAllProducts() {
+    const query = this.productRepository.createQueryBuilder();
+    try {
+      return await query.delete().where({}).execute();
+    } catch (error) {
+      await this.handleExceptions(error);
     }
   }
 
   private handleExceptions(error: any) {
     if (error.status === 404) throw error;
+    if (error.code === '23503') {
+      this.logger.error(error.detail);
+      throw new BadRequestException(
+        `Ocurrió un error de clave foranea al eliminar: ${error.detail}`,
+      );
+    }
     if (error.code === '23505') {
       this.logger.error(error.detail);
       throw new BadRequestException(
-        `Ocurrió un error de duplicidad al crear el producto: ${error.detail}`,
+        `Ocurrió un error de duplicidad al crear: ${error.detail}`,
       );
     }
     this.logger.error(error);

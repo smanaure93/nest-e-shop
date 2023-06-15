@@ -40,7 +40,7 @@ export class ProductsController {
 
   @Get(':search')
   async findOne(@Param('search') search: string) {
-    const product = await this.productsService.findOne(search);
+    const product = await this.productsService.findOnePlain(search);
     return {
       ok: true,
       method: 'GET',
