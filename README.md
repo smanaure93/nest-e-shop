@@ -11,22 +11,26 @@
 
 1. Clonar repositorio
 2. Abrir terminal como administrador
-3. Instalar Nest CLI 
-    ```
-    npm i -g @nestjs/cli
-    ```
-4. Instalar dependencias 
-    ```
-    yarn install
-    ```
-6. Generar archivo ```.env``` a partir de ```.env.template```
+3. Instalar Nest CLI
+   ```
+   npm i -g @nestjs/cli
+   ```
+4. Instalar dependencias
+   ```
+   yarn install
+   ```
+5. Generar archivo `.env` a partir de `.env.template`
 
-7. Instalar imagen de MongoDB 
-    ```
-    docker pull postgres:14.3
-    ```
+6. Instalar imagen de MongoDB
 
-8. Levantar contenedores en ambiente de desarrollo
-    ```
-     docker-compose up -d
-    ```
+   ```
+   docker pull postgres:14.3
+   ```
+
+7. Levantar contenedores en ambiente de desarrollo
+
+   ```
+    docker-compose up -d
+   ```
+
+8. Poblar base de datos para desarrollo, consultando el endpoint: `/api/v2/seed`
