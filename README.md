@@ -21,7 +21,7 @@
    ```
 5. Generar archivo `.env` a partir de `.env.template`
 
-6. Instalar imagen de MongoDB
+6. Instalar imagen de PostgreSQL
 
    ```
    docker pull postgres:14.3
